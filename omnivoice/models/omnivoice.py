@@ -34,7 +34,7 @@ import os
 import re
 from dataclasses import dataclass, fields
 from functools import partial
-from typing import Any, List, Optional, Union
+from typing import Any, Iterator, List, Optional, Union
 
 import numpy as np
 import torch
@@ -71,6 +71,7 @@ from omnivoice.utils.duration import RuleDurationEstimator
 from omnivoice.utils.lang_map import LANG_IDS, LANG_NAMES
 from omnivoice.utils.text import (
     add_punctuation,
+    chunk_text_rolling_tokens,
     chunk_text_punctuation,
     normalize_text as _normalize_text,
 )
@@ -187,6 +188,9 @@ class OmniVoiceGenerationConfig:
     audio_chunk_threshold: float = 30.0
     pad_duration: float = 0.1
     fade_duration: float = 0.1
+    stream_chunk_min_tokens: int = 10
+    stream_chunk_max_tokens: int = 15
+    stream_chunk_overlap_tokens: int = 0
 
     @classmethod
     def from_dict(cls, kwargs_dict):
@@ -725,6 +729,98 @@ class OmniVoice(PreTrainedModel):
             )
 
         return generated_audios
+
+    @torch.inference_mode()
+    def generate_stream(
+        self,
+        text: str,
+        language: Optional[str] = None,
+        ref_text: Optional[str] = None,
+        ref_audio: Optional[Union[str, tuple[torch.Tensor, int]]] = None,
+        voice_clone_prompt: Optional[VoiceClonePrompt] = None,
+        instruct: Optional[str] = None,
+        duration: Optional[float] = None,
+        speed: Optional[float] = None,
+        generation_config: Optional[OmniVoiceGenerationConfig] = None,
+        normalize_text: bool = False,
+        **kwargs,
+    ) -> Iterator[np.ndarray]:
+        """Generate and stream audio chunk-by-chunk for one text item."""
+        if self.audio_tokenizer is None or self.text_tokenizer is None:
+            raise RuntimeError(
+                "Model is not loaded with audio/text tokenizers. Make sure you "
+                "loaded the model with OmniVoice.from_pretrained()."
+            )
+        if not isinstance(text, str):
+            raise TypeError("generate_stream expects `text` to be a string")
+
+        gen_config = (
+            generation_config
+            if generation_config is not None
+            else OmniVoiceGenerationConfig.from_dict(kwargs)
+        )
+        self.eval()
+
+        full_task = self._preprocess_all(
+            text=text,
+            language=language,
+            ref_text=ref_text,
+            ref_audio=ref_audio,
+            voice_clone_prompt=voice_clone_prompt,
+            instruct=instruct,
+            preprocess_prompt=gen_config.preprocess_prompt,
+            speed=speed,
+            duration=duration,
+            normalize_text=normalize_text,
+        )
+        assert full_task.batch_size == 1
+
+        chunks = chunk_text_rolling_tokens(
+            full_task.texts[0],
+            min_chunk_tokens=gen_config.stream_chunk_min_tokens,
+            max_chunk_tokens=gen_config.stream_chunk_max_tokens,
+            overlap_tokens=gen_config.stream_chunk_overlap_tokens,
+        )
+        if not chunks:
+            return
+
+        chunk_post_cfg = OmniVoiceGenerationConfig.from_dict(vars(gen_config))
+        chunk_post_cfg.postprocess_output = False
+        chunk_post_cfg.pad_duration = 0.0
+        chunk_post_cfg.fade_duration = 0.0
+
+        current_ref_audio = full_task.ref_audio_tokens[0]
+        current_ref_text = full_task.ref_texts[0]
+        speed_val = full_task.speed[0] if full_task.speed else 1.0
+        chunk_0_text = chunks[0]
+
+        for chunk_text in chunks:
+            target_len = self._estimate_target_tokens(
+                chunk_text,
+                current_ref_text,
+                current_ref_audio.size(-1) if current_ref_audio is not None else None,
+                speed=speed_val,
+            )
+            sub_task = GenerationTask(
+                batch_size=1,
+                texts=[chunk_text],
+                target_lens=[target_len],
+                langs=[full_task.langs[0]],
+                instructs=[full_task.instructs[0]],
+                ref_texts=[current_ref_text],
+                ref_audio_tokens=[current_ref_audio],
+                ref_rms=[full_task.ref_rms[0]],
+                speed=[speed_val],
+            )
+            chunk_tokens = self._generate_iterative(sub_task, gen_config)[0]
+            chunk_audio = self._decode_and_post_process(
+                chunk_tokens, full_task.ref_rms[0], chunk_post_cfg
+            )
+            yield chunk_audio
+
+            if current_ref_audio is None:
+                current_ref_audio = chunk_tokens
+                current_ref_text = chunk_0_text
 
     def create_voice_clone_prompt(
         self,

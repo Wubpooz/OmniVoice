@@ -20,6 +20,8 @@
 Provides:
 - ``chunk_text_punctuation()``: Splits long text into model-friendly chunks at
   sentence boundaries, with abbreviation-aware punctuation splitting.
+- ``chunk_text_rolling_tokens()``: Splits text into short punctuation-aware
+  rolling windows using token-count constraints.
 - ``add_punctuation()``: Appends missing end punctuation (Chinese or English).
 - ``normalize_text()``: Optional text normalization (numbers, dates, currency,
   etc.) into their spoken form, while preserving inline control syntax.
@@ -120,6 +122,82 @@ ABBREVIATIONS = {
     "fig.",
     "def.",
 }
+
+
+_WORD_OR_PUNCT_RE = re.compile(r"\w+|[^\w\s]", re.UNICODE)
+_NO_SPACE_BEFORE = set(".,;:!?%)]}。，；：！？、）】》」")
+_NO_SPACE_AFTER = set("([{£$€¥#@“‘")
+
+
+def _tokenize_words_and_punct(text: str) -> List[str]:
+    return _WORD_OR_PUNCT_RE.findall(text)
+
+
+def _join_tokens(tokens: List[str]) -> str:
+    out = ""
+    prev = ""
+    for tok in tokens:
+        if not out:
+            out = tok
+        elif tok in _NO_SPACE_BEFORE or prev in _NO_SPACE_AFTER:
+            out += tok
+        else:
+            out += " " + tok
+        prev = tok
+    return out.strip()
+
+
+def _find_chunk_end(tokens: List[str], start: int, min_len: int, max_len: int) -> int:
+    tentative_end = min(start + max_len, len(tokens))
+    lower_bound = min(start + min_len, len(tokens))
+    for i in range(tentative_end - 1, lower_bound - 1, -1):
+        if tokens[i] in SPLIT_PUNCTUATION:
+            return i + 1
+    return tentative_end
+
+
+def chunk_text_rolling_tokens(
+    text: str,
+    min_chunk_tokens: int = 10,
+    max_chunk_tokens: int = 15,
+    overlap_tokens: int = 0,
+) -> List[str]:
+    """Split text into short punctuation-aware rolling token windows.
+
+    Chunks are built with ``min_chunk_tokens``..``max_chunk_tokens`` tokens,
+    preferring to end on punctuation whenever possible.
+    """
+    if max_chunk_tokens <= 0:
+        raise ValueError("max_chunk_tokens must be > 0")
+    if min_chunk_tokens <= 0:
+        raise ValueError("min_chunk_tokens must be > 0")
+    if min_chunk_tokens > max_chunk_tokens:
+        raise ValueError("min_chunk_tokens must be <= max_chunk_tokens")
+    if overlap_tokens < 0:
+        raise ValueError("overlap_tokens must be >= 0")
+    if overlap_tokens >= max_chunk_tokens:
+        raise ValueError("overlap_tokens must be < max_chunk_tokens")
+
+    tokens = _tokenize_words_and_punct(text)
+    if not tokens:
+        return []
+
+    chunks: List[str] = []
+    start = 0
+    step_floor = max_chunk_tokens - overlap_tokens
+    while start < len(tokens):
+        end = _find_chunk_end(tokens, start, min_chunk_tokens, max_chunk_tokens)
+        chunk = _join_tokens(tokens[start:end])
+        if chunk:
+            chunks.append(chunk)
+        if end >= len(tokens):
+            break
+        next_start = end - overlap_tokens
+        if next_start <= start:
+            next_start = start + step_floor
+        start = max(next_start, 0)
+
+    return chunks
 
 
 def chunk_text_punctuation(
