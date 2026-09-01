@@ -281,6 +281,7 @@ Three CLI entry points are provided. The CLI tools support all features availabl
 | `omnivoice-demo` | Interactive Gradio web demo | [omnivoice/cli/demo.py](omnivoice/cli/demo.py) |
 | `omnivoice-infer` | Single-item inference | [omnivoice/cli/infer.py](omnivoice/cli/infer.py) |
 | `omnivoice-infer-batch` | Batch inference across multiple GPUs | [omnivoice/cli/infer_batch.py](omnivoice/cli/infer_batch.py) |
+| `omnivoice-serve` | FastAPI OpenAPI serving endpoints (sync + streaming) | [omnivoice/cli/serve.py](omnivoice/cli/serve.py) |
 
 ### Demo
 
@@ -333,6 +334,21 @@ The test list is a JSONL file where each line is a JSON object:
 Only `id` and `text` are mandatory fields. `ref_audio` and `ref_text` are used in voice cloning mode. `instruct` is used in voice design mode. If no reference audio or instruct are provided, the model will generate text in a random voice.
 
 `language_id`, `duration`, and `speed` are optional. `duration` (in seconds) fixes the output length; `speed` controls the speaking rate. If `duration` and `speed` are both provided, `speed` will be ignored.
+
+### FastAPI Serving
+
+Run a production-friendly FastAPI wrapper with OpenAPI schema:
+
+```bash
+omnivoice-serve --model k2-fsa/OmniVoice --host 0.0.0.0 --port 8000
+```
+
+Endpoints:
+
+- `POST /v1/tts` → returns a full `audio/wav` response.
+- `POST /v1/tts/stream` → returns `application/x-ndjson` where each line contains one Base64-encoded WAV chunk from incremental generation.
+
+Request fields include `text`, `emotion`, `speed`, `language`, `instruct`, and generation controls. The `emotion` field is mapped to OmniVoice inline tags (e.g., `"laughter"` → `"[laughter] ..."`).
 
 ### FlashInfer Acceleration
 
