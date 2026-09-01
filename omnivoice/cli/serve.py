@@ -104,7 +104,8 @@ def create_app(model: OmniVoice) -> FastAPI:
         try:
             audio = model.generate(**kwargs)[0]
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}") from e
+            logging.exception("Synchronous TTS request failed")
+            raise HTTPException(status_code=400, detail="TTS generation failed.") from e
         payload = _wav_bytes(audio, model.sampling_rate)
         return Response(content=payload, media_type="audio/wav")
 
@@ -123,7 +124,8 @@ def create_app(model: OmniVoice) -> FastAPI:
                     }
                     yield (json.dumps(packet) + "\n").encode("utf-8")
             except Exception as e:
-                packet = {"error": f"{type(e).__name__}: {e}"}
+                logging.exception("Streaming TTS request failed")
+                packet = {"error": "TTS streaming failed."}
                 yield (json.dumps(packet) + "\n").encode("utf-8")
 
         return StreamingResponse(_iter(), media_type="application/x-ndjson")
