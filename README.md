@@ -246,6 +246,8 @@ audio = model.generate(
 ```
 See more detailed control in [docs/generation-parameters.md](docs/generation-parameters.md).
 
+For Maltese (`language="mt"`), OmniVoice now applies a deterministic University-of-Malta-inspired G2P preprocessor before tokenization, including handling for `għ`, `ż` vs `z`, and common English loanwords (for example `computer`).
+
 ### Non-Verbal & Pronunciation Control
 
 OmniVoice supports inline **non-verbal symbols** and **pronunciation correction** within the input text.

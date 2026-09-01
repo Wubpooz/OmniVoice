@@ -75,6 +75,10 @@ from omnivoice.utils.text import (
     chunk_text_punctuation,
     normalize_text as _normalize_text,
 )
+from omnivoice.utils.maltese import (
+    preprocess_maltese_text,
+    should_apply_maltese_g2p,
+)
 from omnivoice.utils.voice_design import (
     _INSTRUCT_ALL_VALID,
     _INSTRUCT_EN_TO_ZH,
@@ -191,6 +195,7 @@ class OmniVoiceGenerationConfig:
     stream_chunk_min_tokens: int = 10
     stream_chunk_max_tokens: int = 15
     stream_chunk_overlap_tokens: int = 0
+    enable_maltese_g2p: bool = True
 
     @classmethod
     def from_dict(cls, kwargs_dict):
@@ -697,6 +702,7 @@ class OmniVoice(PreTrainedModel):
             speed=speed,
             duration=duration,
             normalize_text=normalize_text,
+            enable_maltese_g2p=gen_config.enable_maltese_g2p,
         )
 
         short_idx, long_idx = full_task.get_indices(
@@ -772,6 +778,7 @@ class OmniVoice(PreTrainedModel):
             speed=speed,
             duration=duration,
             normalize_text=normalize_text,
+            enable_maltese_g2p=gen_config.enable_maltese_g2p,
         )
         assert full_task.batch_size == 1
 
@@ -1137,6 +1144,7 @@ class OmniVoice(PreTrainedModel):
         speed: Union[float, list[Optional[float]], None] = None,
         duration: Union[float, list[Optional[float]], None] = None,
         normalize_text: bool = False,
+        enable_maltese_g2p: bool = True,
     ) -> GenerationTask:
         if isinstance(text, str):
             text_list = [text]
@@ -1156,6 +1164,12 @@ class OmniVoice(PreTrainedModel):
         if normalize_text:
             text_list = [
                 _normalize_text(t, lang) for t, lang in zip(text_list, language_list)
+            ]
+
+        if enable_maltese_g2p:
+            text_list = [
+                preprocess_maltese_text(t) if should_apply_maltese_g2p(lang) else t
+                for t, lang in zip(text_list, language_list)
             ]
         instruct_list = self._ensure_list(instruct, batch_size)
         for i, s in enumerate(instruct_list):
