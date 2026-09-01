@@ -125,8 +125,8 @@ ABBREVIATIONS = {
 
 
 _WORD_OR_PUNCT_RE = re.compile(r"\w+|[^\w\s]", re.UNICODE)
-_NO_SPACE_BEFORE = set(".,;:!?%)]}。，；：！？、）】》」")
-_NO_SPACE_AFTER = set("([{£$€¥#@“‘")
+_NO_SPACE_BEFORE = set(".,;:!?%)]}。，；：！？、）】》」-'’")
+_NO_SPACE_AFTER = set("([{£$€¥#@“‘-'’")
 
 
 def _tokenize_words_and_punct(text: str) -> List[str]:
@@ -153,7 +153,10 @@ def _find_chunk_end(tokens: List[str], start: int, min_len: int, max_len: int) -
     for i in range(tentative_end - 1, lower_bound - 1, -1):
         if tokens[i] in SPLIT_PUNCTUATION:
             return i + 1
-    return tentative_end
+    end = tentative_end
+    while end < len(tokens) and tokens[end - 1] in {"-", "'", "’"}:
+        end += 1
+    return end
 
 
 def chunk_text_rolling_tokens(
